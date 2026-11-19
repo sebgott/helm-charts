@@ -1,0 +1,202 @@
+suite: SASL OAUTHBEARER
+templates:
+  - deployment.yaml
+  - secret.yaml
+set:
+  sasl.enabled: true
+  sasl.oauthbearer.enabled: true
+tests:
+  - it: uses the client credentials flow with a generated secret
+    set:
+      sasl.oauthbearer.tokenUrl: https://idp.example.com/token
+      sasl.oauthbearer.scopes:
+        - kafka
+        - metrics
+      sasl.oauthbearer.clientId: my-client
+      sasl.oauthbearer.clientSecret: my-secret
+    asserts:
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].args
+          content: --sasl.mechanism=oauthbearer
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].args
+          content: --sasl.oauthbearer-token-url=https://idp.example.com/token
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].args
+          content: --sasl.oauthbearer-scopes=kafka,metrics
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SASL_USER_NAME
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-prometheus-kafka-exporter-oauthbearer
+                key: client-id
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SASL_USER_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-prometheus-kafka-exporter-oauthbearer
+                key: client-secret
+      - template: deployment.yaml
+        notExists:
+          path: spec.template.spec.volumes
+      - template: secret.yaml
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-prometheus-kafka-exporter-oauthbearer
+      - template: secret.yaml
+        equal:
+          path: data
+          value:
+            client-id: bXktY2xpZW50
+            client-secret: bXktc2VjcmV0
+
+  - it: uses an existing secret with custom keys
+    set:
+      sasl.oauthbearer.tokenUrl: https://idp.example.com/token
+      sasl.oauthbearer.secretName: existing-oauth
+      sasl.oauthbearer.clientIdKey: id
+      sasl.oauthbearer.clientSecretKey: secret
+    asserts:
+      - template: deployment.yaml
+        notContains:
+          path: spec.template.spec.containers[0].args
+          any: true
+          content: --sasl.oauthbearer-scopes
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SASL_USER_NAME
+            valueFrom:
+              secretKeyRef:
+                name: existing-oauth
+                key: id
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SASL_USER_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: existing-oauth
+                key: secret
+      - template: secret.yaml
+        hasDocuments:
+          count: 0
+
+  - it: uses a user-provided token file
+    set:
+      sasl.oauthbearer.tokenFile: /var/run/token/token
+      sasl.oauthbearer.tokenUrl: https://idp.example.com/token
+      sasl.oauthbearer.clientId: my-client
+    asserts:
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].args
+          content: --sasl.oauthbearer-token-file=/var/run/token/token
+      - template: deployment.yaml
+        notContains:
+          path: spec.template.spec.containers[0].args
+          content: --sasl.oauthbearer-token-url=https://idp.example.com/token
+      - template: deployment.yaml
+        isNullOrEmpty:
+          path: spec.template.spec.containers[0].env
+      - template: secret.yaml
+        hasDocuments:
+          count: 0
+
+  - it: mounts a projected service account token
+    set:
+      sasl.oauthbearer.serviceAccountToken.enabled: true
+      sasl.oauthbearer.serviceAccountToken.audience: kafka
+      sasl.oauthbearer.tokenFile: /ignored
+    asserts:
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].args
+          content: --sasl.oauthbearer-token-file=/var/run/secrets/kafka-exporter/oauthbearer/token
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            mountPath: /var/run/secrets/kafka-exporter/oauthbearer
+            name: oauthbearer-token
+            readOnly: true
+      - template: deployment.yaml
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: oauthbearer-token
+            projected:
+              sources:
+                - serviceAccountToken:
+                    audience: kafka
+                    expirationSeconds: 3600
+                    path: token
+
+  - it: omits the audience of the projected token when empty
+    set:
+      sasl.oauthbearer.serviceAccountToken.enabled: true
+    asserts:
+      - template: deployment.yaml
+        notExists:
+          path: spec.template.spec.volumes[0].projected.sources[0].serviceAccountToken.audience
+
+  - it: renders nothing for oauthbearer when disabled
+    set:
+      sasl.oauthbearer.enabled: false
+      sasl.oauthbearer.serviceAccountToken.enabled: true
+      sasl.oauthbearer.tokenUrl: https://idp.example.com/token
+      sasl.oauthbearer.clientId: my-client
+    asserts:
+      - template: deployment.yaml
+        notContains:
+          path: spec.template.spec.containers[0].args
+          content: --sasl.mechanism=oauthbearer
+      - template: deployment.yaml
+        notExists:
+          path: spec.template.spec.volumes
+      - template: secret.yaml
+        hasDocuments:
+          count: 0
+
+  - it: fails when sasl is disabled
+    set:
+      sasl.enabled: false
+      sasl.oauthbearer.tokenFile: /token
+    asserts:
+      - template: deployment.yaml
+        failedTemplate:
+          errorMessage: sasl.oauthbearer.enabled requires sasl.enabled to be true
+
+  - it: fails when combined with another mechanism
+    set:
+      sasl.oauthbearer.tokenFile: /token
+      sasl.awsiam.enabled: true
+    asserts:
+      - template: deployment.yaml
+        failedTemplate:
+          errorMessage: sasl.oauthbearer cannot be combined with sasl.scram, sasl.awsiam or sasl.kerberos
+
+  - it: fails without a token source
+    asserts:
+      - template: deployment.yaml
+        failedTemplate:
+          errorMessage: sasl.oauthbearer requires one of sasl.oauthbearer.serviceAccountToken.enabled, sasl.oauthbearer.tokenFile or sasl.oauthbearer.tokenUrl
+
+  - it: fails when the token URL is set without client credentials
+    set:
+      sasl.oauthbearer.tokenUrl: https://idp.example.com/token
+    asserts:
+      - template: deployment.yaml
+        failedTemplate:
+          errorMessage: sasl.oauthbearer.tokenUrl requires sasl.oauthbearer.clientId or sasl.oauthbearer.secretName

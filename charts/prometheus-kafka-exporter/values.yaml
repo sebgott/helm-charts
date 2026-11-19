@@ -221,6 +221,34 @@ sasl:
     # mountPath: /secret/kerberos
     # secretName: <name of an existing secret>
 
+  # If enabled, the exporter will use SASL/OAUTHBEARER authentication (requires sasl.enabled=true).
+  # The token source is selected by precedence: serviceAccountToken.enabled, then tokenFile, then tokenUrl.
+  oauthbearer:
+    enabled: false
+    # Client credentials flow: tokens are retrieved from tokenUrl using a client ID and client secret.
+    tokenUrl: ""
+    # List of scopes to request, joined with ","
+    scopes: []
+    # Add the client ID and client secret
+    clientId: ""
+    clientSecret: ""
+    # or use an existing secret
+    secretName: ""
+    # Keys holding the client ID and client secret in the secret
+    clientIdKey: client-id
+    clientSecretKey: client-secret
+    # Path to a file containing an OAuthBearer token, re-read on each SASL handshake.
+    # The file is not mounted by the chart and has to be provided to the container by other means.
+    tokenFile: ""
+    # Mount a projected ServiceAccount token and use it as the OAuthBearer token
+    serviceAccountToken:
+      enabled: false
+      # Audience of the token, defaults to the API server audience if empty
+      audience: ""
+      expirationSeconds: 3600
+      mountPath: /var/run/secrets/kafka-exporter/oauthbearer
+      path: token
+
 # This enables TLS for web server
 server:
   tls:

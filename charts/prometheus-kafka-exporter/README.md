@@ -56,6 +56,25 @@ See [Customizing the Chart Before Installing](https://helm.sh/docs/intro/using_h
 helm show values oci://ghcr.io/prometheus-community/charts/prometheus-kafka-exporter
 ```
 
+### SASL OAUTHBEARER
+
+The exporter can authenticate using SASL/OAUTHBEARER. The token source is selected by precedence: a chart-managed projected ServiceAccount token, a token file, then a token URL (client credentials flow).
+
+```yaml
+sasl:
+  enabled: true
+  oauthbearer:
+    enabled: true
+    # Client credentials flow
+    tokenUrl: https://idp.example.com/oauth2/token
+    scopes: ["kafka"]
+    secretName: kafka-exporter-oauth  # or clientId/clientSecret
+    # Or use a projected ServiceAccount token instead
+    # serviceAccountToken:
+    #   enabled: true
+    #   audience: kafka
+```
+
 ### Upgrading an existing Release to a new major version
 
 A major chart version change (like v1.2.3 -> v2.0.0) indicates that there is an incompatible breaking change needing manual actions.

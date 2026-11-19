@@ -1,3 +1,5 @@
+{{- include "prometheus-kafka-exporter.validateSaslOAuthBearer" . }}
+{{- $oauthbearerSAToken := and .Values.sasl.enabled .Values.sasl.oauthbearer.enabled .Values.sasl.oauthbearer.serviceAccountToken.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -92,6 +94,21 @@ spec:
             - '--sasl.keytab-path={{ .Values.sasl.kerberos.mountPath }}/kerberos.keytab'
             - '--sasl.kerberos-auth-type={{ .Values.sasl.kerberos.kerberosAuthType }}'
           {{- end }}
+          {{- with .Values.sasl.oauthbearer }}
+          {{- if .enabled }}
+            - '--sasl.mechanism=oauthbearer'
+          {{- if .serviceAccountToken.enabled }}
+            - '--sasl.oauthbearer-token-file={{ .serviceAccountToken.mountPath }}/{{ .serviceAccountToken.path }}'
+          {{- else if .tokenFile }}
+            - '--sasl.oauthbearer-token-file={{ .tokenFile }}'
+          {{- else }}
+            - '--sasl.oauthbearer-token-url={{ .tokenUrl }}'
+          {{- if .scopes }}
+            - '--sasl.oauthbearer-scopes={{ join "," .scopes }}'
+          {{- end }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
           {{- end }}
           {{- if .Values.server.tls.enabled }}
             - '--server.tls.enabled'
@@ -123,6 +140,18 @@ spec:
                   name: {{ template "prometheus-kafka-exporter.saslScramSecretName" . }}
                   key: password
           {{- end }}
+          {{- if include "prometheus-kafka-exporter.saslOAuthBearerClientCredentials" . }}
+            - name: SASL_USER_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "prometheus-kafka-exporter.saslOAuthBearerSecretName" . }}
+                  key: {{ .Values.sasl.oauthbearer.clientIdKey }}
+            - name: SASL_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ template "prometheus-kafka-exporter.saslOAuthBearerSecretName" . }}
+                  key: {{ .Values.sasl.oauthbearer.clientSecretKey }}
+          {{- end }}
           name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -153,7 +182,7 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or (.Values.tls.mountPath) (.Values.sasl.kerberos.mountPath) (.Values.server.tls.mountPath) }}
+          {{- if or (.Values.tls.mountPath) (.Values.sasl.kerberos.mountPath) (.Values.server.tls.mountPath) $oauthbearerSAToken }}
           volumeMounts:
             {{- if .Values.tls.mountPath }}
             - mountPath: {{ .Values.tls.mountPath }}
@@ -170,6 +199,11 @@ spec:
               name: server-certs
               readOnly: true
             {{- end }}
+            {{- if $oauthbearerSAToken }}
+            - mountPath: {{ .Values.sasl.oauthbearer.serviceAccountToken.mountPath }}
+              name: oauthbearer-token
+              readOnly: true
+            {{- end }}
           {{- end }}
     {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -183,7 +217,7 @@ spec:
       tolerations:
 {{ toYaml . | indent 8 }}
     {{- end }}
-      {{- if or (.Values.tls.mountPath) (.Values.sasl.kerberos.mountPath) (.Values.server.tls.mountPath) }}
+      {{- if or (.Values.tls.mountPath) (.Values.sasl.kerberos.mountPath) (.Values.server.tls.mountPath) $oauthbearerSAToken }}
       volumes:
         {{- if .Values.tls.mountPath }}
         - name: kafka-certs
@@ -199,6 +233,19 @@ spec:
         - name: server-certs
           secret:
             secretName: {{ .Values.server.tls.secretName }}
+        {{- end }}
+        {{- if $oauthbearerSAToken }}
+        {{- with .Values.sasl.oauthbearer.serviceAccountToken }}
+        - name: oauthbearer-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  {{- with .audience }}
+                  audience: {{ . }}
+                  {{- end }}
+                  expirationSeconds: {{ .expirationSeconds }}
+                  path: {{ .path }}
+        {{- end }}
         {{- end }}
       {{- end }}
       {{- if or .Values.imagePullSecrets .Values.global.imagePullSecrets }}

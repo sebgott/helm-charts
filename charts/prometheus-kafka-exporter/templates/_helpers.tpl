@@ -65,6 +65,48 @@ Create the name of the SASL SCRAM secret to use
 {{- end -}}
 
 {{/*
+Create the name of the SASL OAUTHBEARER client credentials secret to use
+*/}}
+{{- define "prometheus-kafka-exporter.saslOAuthBearerSecretName" -}}
+{{- if .Values.sasl.oauthbearer.secretName -}}
+    {{ .Values.sasl.oauthbearer.secretName }}
+{{- else -}}
+    {{ printf "%s-oauthbearer" (include "prometheus-kafka-exporter.fullname" . | trunc 51 | trimSuffix "-") }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether SASL OAUTHBEARER uses the client credentials flow (token URL) rather than a token file
+*/}}
+{{- define "prometheus-kafka-exporter.saslOAuthBearerClientCredentials" -}}
+{{- $o := .Values.sasl.oauthbearer -}}
+{{- if and .Values.sasl.enabled $o.enabled (not $o.serviceAccountToken.enabled) (not $o.tokenFile) $o.tokenUrl -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Validate SASL OAUTHBEARER values
+*/}}
+{{- define "prometheus-kafka-exporter.validateSaslOAuthBearer" -}}
+{{- $o := .Values.sasl.oauthbearer -}}
+{{- if $o.enabled -}}
+  {{- if not .Values.sasl.enabled -}}
+    {{- fail "sasl.oauthbearer.enabled requires sasl.enabled to be true" -}}
+  {{- end -}}
+  {{- if or .Values.sasl.scram.enabled .Values.sasl.awsiam.enabled .Values.sasl.kerberos.enabled -}}
+    {{- fail "sasl.oauthbearer cannot be combined with sasl.scram, sasl.awsiam or sasl.kerberos" -}}
+  {{- end -}}
+  {{- if not (or $o.serviceAccountToken.enabled $o.tokenFile $o.tokenUrl) -}}
+    {{- fail "sasl.oauthbearer requires one of sasl.oauthbearer.serviceAccountToken.enabled, sasl.oauthbearer.tokenFile or sasl.oauthbearer.tokenUrl" -}}
+  {{- end -}}
+  {{- if and (include "prometheus-kafka-exporter.saslOAuthBearerClientCredentials" .) (not $o.secretName) (not $o.clientId) -}}
+    {{- fail "sasl.oauthbearer.tokenUrl requires sasl.oauthbearer.clientId or sasl.oauthbearer.secretName" -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Formats imagePullSecrets. Input is (dict "Values" .Values "imagePullSecrets" .{specific imagePullSecrets})
 */}}
 {{- define "prometheus-kafka-exporter.imagePullSecrets" -}}
